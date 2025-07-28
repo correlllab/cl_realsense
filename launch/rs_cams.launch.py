@@ -73,7 +73,7 @@ def make_camera(name: str, serial: str, width: int, height: int, fps: int, sourc
 
             # === Filters ===
             'decimation_filter.enable': True,
-            'decimation_filter.filter_magnitude': 4,
+            'decimation_filter.filter_magnitude': 3,
             'pointcloud.stream_filter':2,
             'pointcloud.stream_index_filter':0,
             'pointcloud.filter_magnitude':2,

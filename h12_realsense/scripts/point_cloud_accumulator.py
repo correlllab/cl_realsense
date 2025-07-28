@@ -17,7 +17,7 @@ CAMERA_NAMES = ['head', 'left_hand']  # topic suffixes for your cameras
 BASE_FRAME = 'pelvis'
 
 # Accumulation settings
-VOXEL_SIZE = 0.02  # downsample voxel size
+VOXEL_SIZE = 0.01  # downsample voxel size
 
 STATISTICAL_OUTLIER_REMOVAL = True
 STATISTICAL_NB_NEIGHBORS = 20
