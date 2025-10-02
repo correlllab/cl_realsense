@@ -27,10 +27,11 @@ def make_camera(name: str, serial: str, width: int, height: int, fps: int, sourc
         emulate_tty=True,
         parameters=[{
             # === Identification & Logging ===
+            'use_sim_time': False,
             'camera_name': name,
             'serial_no': serial,
             'initial_reset': True,
-            # 'base_frame_id':  f'{source_frame}',
+            
 
 
             # === Modalities ===
@@ -84,7 +85,12 @@ def make_camera(name: str, serial: str, width: int, height: int, fps: int, sourc
 
             # === Transform & Playback ===
             'publish_tf': True,
-            'tf_publish_rate': 0.0,
+            # 'base_frame_id':             f'{name}_link',                 # head_link / left_hand_link
+            # 'depth_frame_id':            f'{name}_depth_frame',
+            # 'depth_optical_frame_id':    f'{name}_depth_optical_frame',
+            # 'color_frame_id':            f'{name}_color_frame',
+            # 'color_optical_frame_id':    f'{name}_color_optical_frame',
+            'tf_publish_rate': 10.0,
             # 'json_file_path': '',
             # 'rosbag_filename': '',
             # 'rosbag_loop': False,
@@ -97,42 +103,45 @@ def make_camera(name: str, serial: str, width: int, height: int, fps: int, sourc
 
 def generate_launch_description() -> LaunchDescription:
     ld = LaunchDescription()
-
-    head_cam = make_camera("head", "_250122072330", 424, 240, 6, "head_camera_link")
+    width = 640
+    height = 480
+    head_cam = make_camera("head", "_250122072330", width, height, 6, "head_camera_link")
     ld.add_action(head_cam)
 
-    left_hand_cam = make_camera("left_hand", "_838212072778", 424, 240, 6, "left_hand_camera_link")
+    left_hand_cam = make_camera("left_hand", "_838212072778", width, height, 6, "left_hand_camera_link")
     ld.add_action(left_hand_cam)
 
-    pc_acc_node = Node(
-        package='h12_realsense',
-        executable='pc_acc',
-        name='pc_acc',
-        output='screen',
-        emulate_tty=True,
-    )
-    # Create a TimerAction that will wait for a specified period (in seconds)
-    # before executing the actions listed inside it.
-    delayed_pc_acc_node = TimerAction(
-        period=5.0,  # Wait for 5 seconds before starting the node
-        actions=[pc_acc_node]
-    )
+    # pc_acc_node = Node(
+    #     package='h12_realsense',
+    #     executable='pc_acc',
+    #     name='pc_acc',
+    #     output='screen',
+    #     emulate_tty=True,
+    # )
+    # # Create a TimerAction that will wait for a specified period (in seconds)
+    # # before executing the actions listed inside it.
+    # delayed_pc_acc_node = TimerAction(
+    #     period=5.0,  # Wait for 5 seconds before starting the node
+    #     actions=[pc_acc_node]
+    # )
     
-    # Create the launch description and add the delayed action
-    ld.add_action(delayed_pc_acc_node)
+    # # Create the launch description and add the delayed action
+    # ld.add_action(delayed_pc_acc_node)
 
 
 
+    
 
     static_hand_tf = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
         name='static_hand_tf_hand',
         arguments = [
-            '0', '0', '0', #x, y, z translation
-            '0', '0', '0', '1', #x, y, z, w quats
+            '-0.01866', '-0.0333', '0.108',     # x y z
+            '0.5', '-0.5', '0.5', '0.5',        # qx qy qz qw
             'left_hand_camera_link',
-            'left_hand_depth_optical_frame'
+            'left_hand_link',
+            
         ],
         output='screen'
     )
@@ -146,12 +155,12 @@ def generate_launch_description() -> LaunchDescription:
     static_head_tf = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
-        name='static_hand_tf_head',
+        name='static_head_tf_head',
         arguments = [
             '0', '0', '0', #x, y, z translation
-            '0', '0', '0', '1', #x, y, z, w quats
+            '0.5', '-0.5', '0.5', '0.5', #x, y, z, w quats
             'head_camera_link',
-            'head_depth_optical_frame'
+            'head_link',
         ],
         output='screen'
     )

@@ -14,7 +14,7 @@ import struct
 
 # Configuration
 CAMERA_NAMES = ['head', 'left_hand']  # topic suffixes for your cameras
-BASE_FRAME = 'pelvis'
+BASE_FRAME = 'map'
 
 # Accumulation settings
 VOXEL_SIZE = 0.01  # downsample voxel size
@@ -182,10 +182,10 @@ class PointCloudAccumulator(Node):
         
         msg_out = point_cloud2.create_cloud(header, fields, cloud_data)
         self.publisher.publish(msg_out)
-        self.get_logger().info(f"Published {len(points)} colored points")
+        # self.get_logger().info(f"Published {len(points)} colored points")
 
 def main(args=None):
-    print("\n\n\nStarting PointCloudAccumulator with changes")
+    #print("\n\n\nStarting PointCloudAccumulator with changes")
     rclpy.init(args=args)
     node = PointCloudAccumulator()
     try:
