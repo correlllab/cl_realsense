@@ -112,7 +112,7 @@ def generate_launch_description() -> LaunchDescription:
     ld.add_action(left_hand_cam)
 
     # pc_acc_node = Node(
-    #     package='h12_realsense',
+    #     package='cl_realsense',
     #     executable='pc_acc',
     #     name='pc_acc',
     #     output='screen',

@@ -1,7 +1,7 @@
 from setuptools import find_packages, setup
 import os
 from glob import glob
-package_name = 'h12_realsense'
+package_name = 'cl_realsense'
 
 setup(
     name=package_name,
@@ -23,8 +23,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'pc_acc = h12_realsense.scripts.point_cloud_accumulator:main',
-            'another_node = h12_realsense.scripts.another_node:main',
+            'pc_acc = cl_realsense.scripts.point_cloud_accumulator:main',
+            'another_node = cl_realsense.scripts.another_node:main',
         ],
     },
 )

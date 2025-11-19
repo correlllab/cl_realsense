@@ -1,9 +1,9 @@
-# h12_realsense
+# CL_realsense
 Library for using the realsense cameras the correll lab has mounted on the head and left hand
 
 start with
 ```
-ros2 launch h12_realsense rs_cams.launch.py 
+ros2 launch cl_realsense rs_cams.launch.py 
 ```
 will start the topics
 ```
