@@ -6,6 +6,7 @@ from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
+from launch.actions import LogInfo
 
 from ament_index_python.packages import get_package_share_directory
 
@@ -35,14 +36,21 @@ def make_camera(name: str, serial: str, width: int, height: int, fps: int) -> No
             # === Modalities ===
             'enable_color':True,
             'enable_depth':True,
-            'enable_sync':False,
+            'enable_sync':True,
             'align_depth.enable':True,
-            'pointcloud.enable':True,
+            # 'pointcloud.enable':True,
             'enable_accel':False,            
             'enable_gyro':False,
             'enable_infra1':False,
             'enable_infra2':False,
             'enable_rgbd':False,
+
+            # === idk why we have to do this to get the pc ===
+            'pointcloud__neon_.enable': True,
+            'pointcloud__neon_.stream_filter': 2,
+            'pointcloud__neon_.stream_index_filter': 0,
+            'pointcloud__neon_.filter_magnitude': 2,
+            'pointcloud__neon_.frames_queue_size': 4,
 
             # === Plugins ===
             # f'{name}.color.image_raw.enable_pub_plugins':      ['image_transport/compressed'],
@@ -108,25 +116,34 @@ def generate_launch_description() -> LaunchDescription:
 
     ld.add_action(ee_cam)
 
-    proc_node = Node(
-            package='depth_image_proc',
-            executable='point_cloud_xyz_node',
-            name='depth_image_to_point_cloud',
-            output='screen',
-            parameters=[{
-                'depth_image': '/realsense/ee_cam/aligned_depth_to_color/image_raw',
-                'rgb_image': '/realsense/ee_cam/color/image_raw',
-                'camera_info': '/realsense/ee_cam/aligned_depth_to_color/camera_info',
-                'pointcloud_topic': '/realsense/ee_cam/pointcloud',
-            }],
-            remappings=[
-                ('/image_rect', '/realsense/ee_cam/aligned_depth_to_color/image_raw'),
-                ('/camera/color/image', '/realsense/ee_cam/color/image_raw'),
-                ('/camera_info', '/realsense/ee_cam/aligned_depth_to_color/camera_info'),
-                ('/camera/pointcloud', '/realsense/ee_cam/pointcloud'),
-            ]
+    # proc_node = Node(
+    #         package='depth_image_proc',
+    #         executable='point_cloud_xyz_node',
+    #         name='depth_image_to_point_cloud',
+    #         output='screen',
+    #         parameters=[{
+    #             'depth_image': '/realsense/ee_cam/aligned_depth_to_color/image_raw',
+    #             'rgb_image': '/realsense/ee_cam/color/image_raw',
+    #             'camera_info': '/realsense/ee_cam/aligned_depth_to_color/camera_info',
+    #             'pointcloud_topic': '/realsense/ee_cam/pointcloud',
+    #         }],
+    #         remappings=[
+    #             ('/image_rect', '/realsense/ee_cam/aligned_depth_to_color/image_raw'),
+    #             ('/camera/color/image', '/realsense/ee_cam/color/image_raw'),
+    #             ('/camera_info', '/realsense/ee_cam/aligned_depth_to_color/camera_info'),
+    #             ('/camera/pointcloud', '/realsense/ee_cam/pointcloud'),
+    #         ]
+    # )
+    # ld.add_action(proc_node)
+
+
+    acc_node = Node(
+        package = "cl_realsense",
+        executable = "pc_acc",
+        name = "pointcloud_accumulator",
+        output = "screen"
     )
-    ld.add_action(proc_node)
+    ld.add_action(acc_node)
 
     neg_ninety = str(-3.1415/2.)
     static_ee_cam_tf = Node(
@@ -146,6 +163,5 @@ def generate_launch_description() -> LaunchDescription:
     #     actions=[static_ee_cam_tf]
     # )
     ld.add_action(static_ee_cam_tf)
-    print("here3")
-
+    print("here4 from", __file__)
     return ld

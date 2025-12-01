@@ -13,19 +13,20 @@ from std_msgs.msg import Header
 from std_srvs.srv import Trigger
 from ur_manipulation.srv import GetPointCloud
 import time
+import struct
 
 # Configuration
-TOPIC_NAMES = ["/points"]  # topic suffixes for your cameras
-BASE_FRAME = 'base_link'
+TOPIC_NAMES = ["/realsense/ee_cam/depth/color/points"]  # topic suffixes for your cameras
+BASE_FRAME = 'world'
 
 # Accumulation settings
 VOXEL_SIZE = 0.01  # downsample voxel size
 
-STATISTICAL_OUTLIER_REMOVAL = True
+STATISTICAL_OUTLIER_REMOVAL = False
 STATISTICAL_NB_NEIGHBORS = 20
 STATISTICAL_STD_RATIO = 2.0
 
-RADIUS_OUTLIER_REMOVAL = False
+RADIUS_OUTLIER_REMOVAL = True
 RADIUS_NB_POINTS = 16
 RADIUS_RADIUS = 0.1
 
@@ -36,19 +37,30 @@ TF_TIMEOUT_SEC = 0.5
 
 def msg_to_pcd(msg: PointCloud2) -> o3d.geometry.PointCloud:
     """
-    Convert ROS PointCloud2 message to Open3D PointCloud.
+    Convert ROS PointCloud2 message to Open3D PointCloud (with color).
+    Handles packed 'rgb' field from RealSense cameras.
     """
-    # Read points and colors
-    points_list = list(point_cloud2.read_points(msg, field_names=('x', 'y', 'z'), skip_nans=True))
-    
+    points_list = list(point_cloud2.read_points(msg, field_names=('x', 'y', 'z', 'rgb'), skip_nans=True))
     if not points_list:
         return o3d.geometry.PointCloud()
 
-    # Separate xyz and rgb
     xyz = [[p[0], p[1], p[2]] for p in points_list]
+    rgb_floats = [p[3] for p in points_list]
+
+    endian = '>' if msg.is_bigendian else '<'
+    rgb_bytes = struct.pack(endian + 'f' * len(rgb_floats), *rgb_floats)
+    rgb_uint32s = struct.unpack(endian + 'I' * len(rgb_floats), rgb_bytes)
+
+    colors = []
+    for i in rgb_uint32s:
+        r = (i >> 16) & 0xFF
+        g = (i >> 8) & 0xFF
+        b = i & 0xFF
+        colors.append([r / 255.0, g / 255.0, b / 255.0])
 
     pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(np.array(xyz))    
+    pcd.points = o3d.utility.Vector3dVector(np.asarray(xyz, dtype=np.float32))
+    pcd.colors = o3d.utility.Vector3dVector(np.asarray(colors, dtype=np.float32))
     return pcd
 
 
@@ -108,21 +120,38 @@ class PointCloudAccumulator(Node):
 
     def get_msg(self) -> PointCloud2:
         with self._lock:
-            points = np.asarray(self.pcd.points, dtype=np.float32).copy()
-
+            points = np.asarray(self.pcd.points)
+            colors = np.asarray(self.pcd.colors)
         header = Header()
         header.stamp = self.get_clock().now().to_msg()
         header.frame_id = BASE_FRAME
-
         if points.size == 0:
-            # Well-formed but empty cloud
             return point_cloud2.create_cloud_xyz32(header, np.zeros((0, 3), dtype=np.float32))
-
-        # xyz-only helper
-        return point_cloud2.create_cloud_xyz32(header, points)
+        
+        colors_uint8 = (colors * 255).astype(np.uint8)
+        
+        rgb_uint32 = np.left_shift(colors_uint8[:, 0].astype(np.uint32), 16) | \
+                     np.left_shift(colors_uint8[:, 1].astype(np.uint32), 8) | \
+                     colors_uint8[:, 2].astype(np.uint32)
+        rgb_float32 = rgb_uint32.view(np.float32)
+        
+        cloud_data = np.hstack([points.astype(np.float32), rgb_float32[:, np.newaxis]])
+        
+        fields = [
+            PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
+            PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
+            PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1),
+            PointField(name='rgb', offset=12, datatype=PointField.FLOAT32, count=1),
+        ]
+        
+        msg_out = point_cloud2.create_cloud(header, fields, cloud_data)
+        return msg_out
 
     def pc_callback(self, msg: PointCloud2):
         source_frame = msg.header.frame_id
+        t = msg.header.stamp.sec
+        # self.get_logger().info(f"recived pointcloud from {source_frame}, at time {t}")
+
         try:
             trans = self.tf_buffer.lookup_transform(
                 BASE_FRAME,
@@ -157,16 +186,19 @@ class PointCloudAccumulator(Node):
             with self._lock:
                 self.pcd += cloud
                 self.pcd = self.pcd.voxel_down_sample(VOXEL_SIZE)
-                
+                # print(f"{type(self.pcd)=}")
+                #idk why these print progres bars
                 if STATISTICAL_OUTLIER_REMOVAL:
                     self.pcd, _ = self.pcd.remove_statistical_outlier(
                         nb_neighbors=STATISTICAL_NB_NEIGHBORS,
-                        std_ratio=STATISTICAL_STD_RATIO
+                        std_ratio=STATISTICAL_STD_RATIO,
+                        print_progress=False
                     )
                 if RADIUS_OUTLIER_REMOVAL:
                     self.pcd, _ = self.pcd.remove_radius_outlier(
                         nb_points=RADIUS_NB_POINTS,
-                        radius=RADIUS_RADIUS
+                        radius=RADIUS_RADIUS,
+                        print_progress=False
                     )
 
 
@@ -193,7 +225,7 @@ class PointCloudAccumulator(Node):
         return response
 
 def main(args=None):
-    #print("\n\n\nStarting PointCloudAccumulator with changes")
+    # print("\n\n\nStarting PointCloudAccumulator")
     rclpy.init(args=args)
     node = PointCloudAccumulator()
     try:
