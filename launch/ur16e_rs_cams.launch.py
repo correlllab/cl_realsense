@@ -82,13 +82,13 @@ def make_camera(name: str, serial: str, width: int, height: int, fps: int) -> No
             # 'hole_filling_filter.enable': False,
 
             # === Transform & Playback ===
-            'publish_tf': True,
+            # 'publish_tf': True,
             # 'base_frame_id':             f'{name}_link',                 # head_link / left_hand_link
             # 'depth_frame_id':            f'{name}_depth_frame',
             # 'depth_optical_frame_id':    f'{name}_depth_optical_frame',
             # 'color_frame_id':            f'{name}_color_frame',
             # 'color_optical_frame_id':    f'{name}_color_optical_frame',
-            'tf_publish_rate': 10.0,
+            # 'tf_publish_rate': 10.0,
             # 'json_file_path': '',
             # 'rosbag_filename': '',
             # 'rosbag_loop': False,
@@ -101,28 +101,51 @@ def make_camera(name: str, serial: str, width: int, height: int, fps: int) -> No
 
 def generate_launch_description() -> LaunchDescription:
     ld = LaunchDescription()
-    width = 1280
-    height = 720
+    width = 640
+    height = 480
     ee_cam = make_camera("ee_cam", "_838212073340", width, height, 6)
+    # ee_cam = make_camera("ee_cam", "_836612071918", width, height, 6)
+
     ld.add_action(ee_cam)
 
+    proc_node = Node(
+            package='depth_image_proc',
+            executable='point_cloud_xyz_node',
+            name='depth_image_to_point_cloud',
+            output='screen',
+            parameters=[{
+                'depth_image': '/realsense/ee_cam/aligned_depth_to_color/image_raw',
+                'rgb_image': '/realsense/ee_cam/color/image_raw',
+                'camera_info': '/realsense/ee_cam/aligned_depth_to_color/camera_info',
+                'pointcloud_topic': '/realsense/ee_cam/pointcloud',
+            }],
+            remappings=[
+                ('/image_rect', '/realsense/ee_cam/aligned_depth_to_color/image_raw'),
+                ('/camera/color/image', '/realsense/ee_cam/color/image_raw'),
+                ('/camera_info', '/realsense/ee_cam/aligned_depth_to_color/camera_info'),
+                ('/camera/pointcloud', '/realsense/ee_cam/pointcloud'),
+            ]
+    )
+    ld.add_action(proc_node)
+
+    neg_ninety = str(-3.1415/2.)
     static_ee_cam_tf = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
         name='static_ee_cam_tf',
         arguments = [
-            '0', '0', '0',
-            '0', '0', '0', '1',
-            'ee_link',
+            '0.0199', '-0.1767', '0.0534',
+            neg_ninety, neg_ninety, neg_ninety,
+            'tool0',
             'ee_cam_link',
         ],
         output='screen'
     )
-    delayed_ee_cam_tf = TimerAction(
-        period=10.0,  # Wait for 5 seconds before starting the static transform
-        actions=[static_ee_cam_tf]
-    )
-    ld.add_action(delayed_ee_cam_tf)
-
+    # delayed_ee_cam_tf = TimerAction(
+    #     period=10.0,  # Wait for 5 seconds before starting the static transform
+    #     actions=[static_ee_cam_tf]
+    # )
+    ld.add_action(static_ee_cam_tf)
+    print("here3")
 
     return ld

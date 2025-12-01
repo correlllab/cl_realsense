@@ -10,11 +10,13 @@ import open3d as o3d
 import numpy as np
 from sensor_msgs_py import point_cloud2
 from std_msgs.msg import Header
-import struct
+from std_srvs.srv import Trigger
+from ur_manipulation.srv import GetPointCloud
+import time
 
 # Configuration
-CAMERA_NAMES = ['head', 'left_hand']  # topic suffixes for your cameras
-BASE_FRAME = 'map'
+TOPIC_NAMES = ["/points"]  # topic suffixes for your cameras
+BASE_FRAME = 'base_link'
 
 # Accumulation settings
 VOXEL_SIZE = 0.01  # downsample voxel size
@@ -31,37 +33,24 @@ OUTPUT_TOPIC = '/realsense/accumulated_point_cloud'
 PUBLISH_RATE_HZ = 6.0
 TF_TIMEOUT_SEC = 0.5
 
+
 def msg_to_pcd(msg: PointCloud2) -> o3d.geometry.PointCloud:
     """
-    Convert ROS PointCloud2 message to Open3D PointCloud (with color).
-    This function handles the packed 'rgb' field from RealSense cameras.
+    Convert ROS PointCloud2 message to Open3D PointCloud.
     """
     # Read points and colors
-    points_list = list(point_cloud2.read_points(msg, field_names=('x', 'y', 'z', 'rgb'), skip_nans=True))
+    points_list = list(point_cloud2.read_points(msg, field_names=('x', 'y', 'z'), skip_nans=True))
     
     if not points_list:
         return o3d.geometry.PointCloud()
 
     # Separate xyz and rgb
     xyz = [[p[0], p[1], p[2]] for p in points_list]
-    
-    # Handle the packed RGB float
-    rgb_floats = [p[3] for p in points_list]
-    rgb_bytes = struct.pack('f' * len(rgb_floats), *rgb_floats)
-    rgb_uint32s = struct.unpack('I' * len(rgb_floats), rgb_bytes)
-    
-    colors = []
-    for i in rgb_uint32s:
-        r = (i >> 16) & 0xFF
-        g = (i >> 8) & 0xFF
-        b = i & 0xFF
-        colors.append([r / 255.0, g / 255.0, b / 255.0])
 
     pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(np.array(xyz))
-    pcd.colors = o3d.utility.Vector3dVector(np.array(colors))
-    
+    pcd.points = o3d.utility.Vector3dVector(np.array(xyz))    
     return pcd
+
 
 def transform_to_matrix(trans) -> np.ndarray:
     """
@@ -93,22 +82,44 @@ class PointCloudAccumulator(Node):
         )
 
         self.subscribers = []
-        for cam in CAMERA_NAMES:
-            topic = f"/realsense/{cam}/depth/color/points"
+        for topic in TOPIC_NAMES:
             sub = self.create_subscription(PointCloud2, topic, self.pc_callback, pc_qos)
             self.get_logger().info(f"Subscribed to {topic}")
             self.subscribers.append(sub)
 
         self.publisher = self.create_publisher(PointCloud2, OUTPUT_TOPIC, pc_qos)
+
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
+
         self.pcd = o3d.geometry.PointCloud()
+        self.srv = self.create_service(Trigger, "clear_arm_pointcloud", self.pc_clear_callback)
+        self.srv = self.create_service(GetPointCloud, "get_arm_pointcloud", self.arm_pointcloud_callback)
+
         self._lock = threading.Lock()
         self.msg_queue = []
         self._timer = self.create_timer(1.0 / PUBLISH_RATE_HZ, self.publish_accumulated_pc)
         self._executor = rclpy.executors.SingleThreadedExecutor()
         self._executor.add_node(self)
+        
+        
         threading.Thread(target=self._executor.spin, daemon=True).start()
+    
+
+    def get_msg(self) -> PointCloud2:
+        with self._lock:
+            points = np.asarray(self.pcd.points, dtype=np.float32).copy()
+
+        header = Header()
+        header.stamp = self.get_clock().now().to_msg()
+        header.frame_id = BASE_FRAME
+
+        if points.size == 0:
+            # Well-formed but empty cloud
+            return point_cloud2.create_cloud_xyz32(header, np.zeros((0, 3), dtype=np.float32))
+
+        # xyz-only helper
+        return point_cloud2.create_cloud_xyz32(header, points)
 
     def pc_callback(self, msg: PointCloud2):
         source_frame = msg.header.frame_id
@@ -127,11 +138,15 @@ class PointCloudAccumulator(Node):
 
     def main_loop(self):
         while rclpy.ok():
-            if not self.msg_queue:
-                rclpy.spin_once(self, timeout_sec=0.1)
-                continue
+            msg, trans = None, None
             with self._lock:
-                msg, trans = self.msg_queue.pop(0)
+                if self.msg_queue:                    
+                    msg, trans = self.msg_queue.pop(0)
+
+            if msg is None:
+                time.sleep(0.1)
+                continue
+            
             
             mat = transform_to_matrix(trans)
             cloud = msg_to_pcd(msg)
@@ -139,50 +154,43 @@ class PointCloudAccumulator(Node):
                 continue
             
             cloud.transform(mat)
-            self.pcd += cloud
-            self.pcd = self.pcd.voxel_down_sample(VOXEL_SIZE)
-            
-            if STATISTICAL_OUTLIER_REMOVAL:
-                self.pcd, _ = self.pcd.remove_statistical_outlier(
-                    nb_neighbors=STATISTICAL_NB_NEIGHBORS,
-                    std_ratio=STATISTICAL_STD_RATIO
-                )
-            if RADIUS_OUTLIER_REMOVAL:
-                self.pcd, _ = self.pcd.remove_radius_outlier(
-                    nb_points=RADIUS_NB_POINTS,
-                    radius=RADIUS_RADIUS
-                )
+            with self._lock:
+                self.pcd += cloud
+                self.pcd = self.pcd.voxel_down_sample(VOXEL_SIZE)
+                
+                if STATISTICAL_OUTLIER_REMOVAL:
+                    self.pcd, _ = self.pcd.remove_statistical_outlier(
+                        nb_neighbors=STATISTICAL_NB_NEIGHBORS,
+                        std_ratio=STATISTICAL_STD_RATIO
+                    )
+                if RADIUS_OUTLIER_REMOVAL:
+                    self.pcd, _ = self.pcd.remove_radius_outlier(
+                        nb_points=RADIUS_NB_POINTS,
+                        radius=RADIUS_RADIUS
+                    )
+
 
     def publish_accumulated_pc(self):
-        if not self.pcd.has_points():
-            return
-            
-        header = Header()
-        header.stamp = self.get_clock().now().to_msg()
-        header.frame_id = BASE_FRAME
-        
-        points = np.asarray(self.pcd.points)
-        colors = np.asarray(self.pcd.colors)
-        
-        colors_uint8 = (colors * 255).astype(np.uint8)
-        
-        rgb_uint32 = np.left_shift(colors_uint8[:, 0].astype(np.uint32), 16) | \
-                     np.left_shift(colors_uint8[:, 1].astype(np.uint32), 8) | \
-                     colors_uint8[:, 2].astype(np.uint32)
-        rgb_float32 = rgb_uint32.view(np.float32)
-        
-        cloud_data = np.hstack([points.astype(np.float32), rgb_float32[:, np.newaxis]])
-        
-        fields = [
-            PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
-            PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
-            PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1),
-            PointField(name='rgb', offset=12, datatype=PointField.FLOAT32, count=1),
-        ]
-        
-        msg_out = point_cloud2.create_cloud(header, fields, cloud_data)
+        msg_out = self.get_msg()
         self.publisher.publish(msg_out)
-        # self.get_logger().info(f"Published {len(points)} colored points")
+
+    def pc_clear_callback(self, request, response):
+        self.get_logger().info(f"Got request: {request}")
+        with self._lock:
+            self.pcd = o3d.geometry.PointCloud()
+            self.msg_queue = []
+        response.success = True
+        response.message = "Reset Accumulated Point Cloud"
+        return response
+
+    def arm_pointcloud_callback(self, request, response):
+        self.get_logger().info("PointCloud service called")
+
+        msg_out = self.get_msg()
+
+        response.cloud = msg_out
+
+        return response
 
 def main(args=None):
     #print("\n\n\nStarting PointCloudAccumulator with changes")
