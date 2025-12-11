@@ -14,19 +14,20 @@ from std_srvs.srv import Trigger
 from ur_manipulation.srv import GetPointCloud
 import time
 import struct
+import os
 
 # Configuration
 TOPIC_NAMES = ["/realsense/ee_cam/depth/color/points"]  # topic suffixes for your cameras
-BASE_FRAME = 'world'
+BASE_FRAME = 'floor_link'
 
 # Accumulation settings
 VOXEL_SIZE = 0.01  # downsample voxel size
 
 STATISTICAL_OUTLIER_REMOVAL = False
 STATISTICAL_NB_NEIGHBORS = 20
-STATISTICAL_STD_RATIO = 2.0
+STATISTICAL_STD_RATIO = 3.0
 
-RADIUS_OUTLIER_REMOVAL = True
+RADIUS_OUTLIER_REMOVAL = False
 RADIUS_NB_POINTS = 16
 RADIUS_RADIUS = 0.1
 
@@ -35,12 +36,29 @@ PUBLISH_RATE_HZ = 6.0
 TF_TIMEOUT_SEC = 0.5
 
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+POINTCLOUD_SAVE_DIR = os.path.join(SCRIPT_DIR, "accumulated_pointclouds")
+POINTCLOUD_PATH = os.path.join(POINTCLOUD_SAVE_DIR, "accumulated_pointcloud.ply")
+AUTO_LOAD_ON_STARTUP = True 
+MAX_DISTANCE_FROM_CAMERA = 0.5  # meters
+MAX_QUEUE_SIZE = 10
+
 def msg_to_pcd(msg: PointCloud2) -> o3d.geometry.PointCloud:
     """
     Convert ROS PointCloud2 message to Open3D PointCloud (with color).
     Handles packed 'rgb' field from RealSense cameras.
     """
     points_list = list(point_cloud2.read_points(msg, field_names=('x', 'y', 'z', 'rgb'), skip_nans=True))
+    if not points_list:
+        return o3d.geometry.PointCloud()
+
+    filtered_points = []
+    for p in points_list:
+        distance = np.sqrt(p[0]**2 + p[1]**2 + p[2]**2)
+        if distance <= MAX_DISTANCE_FROM_CAMERA:
+            filtered_points.append(p)
+    points_list = filtered_points
+    
     if not points_list:
         return o3d.geometry.PointCloud()
 
@@ -63,7 +81,6 @@ def msg_to_pcd(msg: PointCloud2) -> o3d.geometry.PointCloud:
     pcd.colors = o3d.utility.Vector3dVector(np.asarray(colors, dtype=np.float32))
     return pcd
 
-
 def transform_to_matrix(trans) -> np.ndarray:
     """
     Convert a TransformStamped into a 4x4 numpy transformation matrix.
@@ -85,6 +102,7 @@ def transform_to_matrix(trans) -> np.ndarray:
 class PointCloudAccumulator(Node):
     def __init__(self):
         super().__init__('point_cloud_accumulator')
+        os.makedirs(POINTCLOUD_SAVE_DIR, exist_ok=True)
 
         pc_qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -105,8 +123,14 @@ class PointCloudAccumulator(Node):
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
 
         self.pcd = o3d.geometry.PointCloud()
-        self.srv = self.create_service(Trigger, "clear_arm_pointcloud", self.pc_clear_callback)
-        self.srv = self.create_service(GetPointCloud, "get_arm_pointcloud", self.arm_pointcloud_callback)
+        self.clear_srv = self.create_service(Trigger, "pointcloud_accumulator/clear_arm_pointcloud", self.pc_clear_callback)
+        self.get_srv = self.create_service(GetPointCloud, "pointcloud_accumulator/get_arm_pointcloud", self.arm_pointcloud_callback)
+        self.srv_save = self.create_service(Trigger, "pointcloud_accumulator/save_arm_pointcloud", self.save_pointcloud_callback)
+        self.srv_load = self.create_service(Trigger, "pointcloud_accumulator/load_arm_pointcloud", self.load_pointcloud_callback)
+        self.stop_acc_srv = self.create_service(Trigger, "pointcloud_accumulator/stop_acc", self.stop_save_callback)
+        self.start_acc_srv = self.create_service(Trigger, "pointcloud_accumulator/start_acc", self.start_save_callback)
+        self.acc_bool = True
+
 
         self._lock = threading.Lock()
         self.msg_queue = []
@@ -116,7 +140,21 @@ class PointCloudAccumulator(Node):
         
         
         threading.Thread(target=self._executor.spin, daemon=True).start()
+
+        if AUTO_LOAD_ON_STARTUP:
+            self.load_pointcloud()
     
+    def stop_save_callback(self, request, response):
+        self.acc_bool = False
+        response.message = "stopped accumulating"
+        response.success = True
+        return response 
+    def startsave_callback(self, request, response):
+        self.acc_bool = True
+        response.message = "started accumulating"
+        response.success = True
+        return response 
+
 
     def get_msg(self) -> PointCloud2:
         with self._lock:
@@ -163,9 +201,15 @@ class PointCloudAccumulator(Node):
             self.get_logger().warning(f"TF lookup failed from '{source_frame}' to '{BASE_FRAME}': {e}")
             return
         with self._lock:
+            len_queue = len(self.msg_queue)
+            print(f"{len_queue=}")
+
+            if len_queue >= MAX_QUEUE_SIZE:
+                return
             self.msg_queue.append((msg, trans))
 
     def main_loop(self):
+        # print("Starting PointCloudAccumulator main loop")
         while rclpy.ok():
             msg, trans = None, None
             with self._lock:
@@ -184,23 +228,25 @@ class PointCloudAccumulator(Node):
             
             cloud.transform(mat)
             with self._lock:
-                self.pcd += cloud
-                self.pcd = self.pcd.voxel_down_sample(VOXEL_SIZE)
-                # print(f"{type(self.pcd)=}")
-                #idk why these print progres bars
-                if STATISTICAL_OUTLIER_REMOVAL:
-                    self.pcd, _ = self.pcd.remove_statistical_outlier(
-                        nb_neighbors=STATISTICAL_NB_NEIGHBORS,
-                        std_ratio=STATISTICAL_STD_RATIO,
-                        print_progress=False
-                    )
-                if RADIUS_OUTLIER_REMOVAL:
-                    self.pcd, _ = self.pcd.remove_radius_outlier(
-                        nb_points=RADIUS_NB_POINTS,
-                        radius=RADIUS_RADIUS,
-                        print_progress=False
-                    )
-
+                if self.acc_bool:
+                    self.pcd += cloud
+                    self.pcd = self.pcd.voxel_down_sample(VOXEL_SIZE)
+                    # print(f"{type(self.pcd)=}")
+                    #idk why these print progres bars
+                    if STATISTICAL_OUTLIER_REMOVAL:
+                        self.pcd, _ = self.pcd.remove_statistical_outlier(
+                            nb_neighbors=STATISTICAL_NB_NEIGHBORS,
+                            std_ratio=STATISTICAL_STD_RATIO,
+                            print_progress=False
+                        )
+                        # print("statistical outlier removal done")
+                    if RADIUS_OUTLIER_REMOVAL:
+                        self.pcd, _ = self.pcd.remove_radius_outlier(
+                            nb_points=RADIUS_NB_POINTS,
+                            radius=RADIUS_RADIUS,
+                            print_progress=False
+                        )
+                    # print("radius outlier removal done")
 
     def publish_accumulated_pc(self):
         msg_out = self.get_msg()
@@ -223,6 +269,77 @@ class PointCloudAccumulator(Node):
         response.cloud = msg_out
 
         return response
+
+    def save_pointcloud_callback(self, request, response):
+        response.success = self.save_pointcloud()
+        response.message = "Saved point cloud to disk" if response.success else "Failed to save point cloud"
+        return response
+
+    def load_pointcloud_callback(self, request, response):
+        response.success = self.load_pointcloud()
+        response.message = "Loaded point cloud from disk" if response.success else "Failed to load point cloud"
+        return response
+
+    def save_pointcloud(self) -> bool:
+        """
+        Save the accumulated point cloud.            
+        Returns:
+            bool: True if save was successful
+        """
+        pcd_copy = None
+        with self._lock:
+            if not self.pcd.has_points():
+                self.get_logger().warn("No points to save")
+                return False
+            
+            pcd_copy = o3d.geometry.PointCloud(self.pcd)
+        
+        try:
+            self.get_logger().debug(f"Writing to: {POINTCLOUD_PATH}")
+            
+            # Save as compressed binary PLY
+            success = o3d.io.write_point_cloud(
+                POINTCLOUD_PATH, 
+                pcd_copy, 
+                write_ascii=False,
+                compressed=True
+            )
+            self.get_logger().info(f"Saved point cloud: {POINTCLOUD_PATH} ({len(pcd_copy.points)} points)")
+            return success
+        except Exception as e:
+            return False
+        
+    def load_pointcloud(self) -> bool:
+        """
+        Load accumulated point cloud from disk.
+        
+        Returns:
+            bool: True if load was successful
+        """
+        if not os.path.exists(POINTCLOUD_PATH):
+            self.get_logger().info(f"No saved point cloud found at {POINTCLOUD_PATH}")
+            return False
+        
+        try:
+            loaded_pcd = o3d.io.read_point_cloud(POINTCLOUD_PATH)
+            
+            if not loaded_pcd.has_points():
+                self.get_logger().warn(f"Loaded point cloud is empty: {POINTCLOUD_PATH}")
+                return False
+            
+            with self._lock:
+                self.pcd = loaded_pcd
+            
+            num_points = len(loaded_pcd.points)
+            self.get_logger().info(
+                f"Loaded point cloud: {POINTCLOUD_PATH} ({num_points} points)"
+            )
+            return True
+            
+        except Exception as e:
+            self.get_logger().error(f"Error loading point cloud: {e}")
+            return False
+    
 
 def main(args=None):
     # print("\n\n\nStarting PointCloudAccumulator")

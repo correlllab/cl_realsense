@@ -115,12 +115,13 @@ def generate_launch_description() -> LaunchDescription:
     # ee_cam = make_camera("ee_cam", "_836612071918", width, height, 6)
 
     ld.add_action(ee_cam)
+    output_stream = "log"
 
     # proc_node = Node(
     #         package='depth_image_proc',
     #         executable='point_cloud_xyz_node',
     #         name='depth_image_to_point_cloud',
-    #         output='screen',
+    #         output=output_stream,
     #         parameters=[{
     #             'depth_image': '/realsense/ee_cam/aligned_depth_to_color/image_raw',
     #             'rgb_image': '/realsense/ee_cam/color/image_raw',
@@ -141,7 +142,7 @@ def generate_launch_description() -> LaunchDescription:
         package = "cl_realsense",
         executable = "pc_acc",
         name = "pointcloud_accumulator",
-        output = "screen"
+        output = output_stream
     )
     ld.add_action(acc_node)
 
@@ -151,12 +152,14 @@ def generate_launch_description() -> LaunchDescription:
         executable='static_transform_publisher',
         name='static_ee_cam_tf',
         arguments = [
-            '0.0199', '-0.1767', '0.0534',
-            neg_ninety, neg_ninety, neg_ninety,
+            '0.033838200335085646', '-0.16124934095715254', '0.04973827839776546',
+            '0.7090084119721195', '0.004283455595113997', '0.7051866592991314', '0.000706616917886843',
+            #'0.0199', '-0.1767', '0.0534',
+            #neg_ninety, neg_ninety, neg_ninety,
             'tool0',
             'ee_cam_link',
         ],
-        output='screen'
+        output=output_stream
     )
     # delayed_ee_cam_tf = TimerAction(
     #     period=10.0,  # Wait for 5 seconds before starting the static transform
