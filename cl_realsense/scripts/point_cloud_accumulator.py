@@ -28,8 +28,8 @@ STATISTICAL_NB_NEIGHBORS = 20
 STATISTICAL_STD_RATIO = 3.0
 
 RADIUS_OUTLIER_REMOVAL = False
-RADIUS_NB_POINTS = 16
-RADIUS_RADIUS = 0.1
+RADIUS_NB_POINTS = 5
+RADIUS_RADIUS = 0.05
 
 OUTPUT_TOPIC = '/realsense/accumulated_point_cloud'
 PUBLISH_RATE_HZ = 6.0
@@ -129,7 +129,7 @@ class PointCloudAccumulator(Node):
         self.srv_load = self.create_service(Trigger, "pointcloud_accumulator/load_arm_pointcloud", self.load_pointcloud_callback)
         self.stop_acc_srv = self.create_service(Trigger, "pointcloud_accumulator/stop_acc", self.stop_save_callback)
         self.start_acc_srv = self.create_service(Trigger, "pointcloud_accumulator/start_acc", self.start_save_callback)
-        self.acc_bool = True
+        self.acc_bool = False
 
 
         self._lock = threading.Lock()
@@ -149,7 +149,7 @@ class PointCloudAccumulator(Node):
         response.message = "stopped accumulating"
         response.success = True
         return response 
-    def startsave_callback(self, request, response):
+    def start_save_callback(self, request, response):
         self.acc_bool = True
         response.message = "started accumulating"
         response.success = True
@@ -203,13 +203,12 @@ class PointCloudAccumulator(Node):
         with self._lock:
             len_queue = len(self.msg_queue)
             print(f"{len_queue=}")
-
             if len_queue >= MAX_QUEUE_SIZE:
                 return
             self.msg_queue.append((msg, trans))
 
     def main_loop(self):
-        # print("Starting PointCloudAccumulator main loop")
+        print("Starting PointCloudAccumulator main loop")
         while rclpy.ok():
             msg, trans = None, None
             with self._lock:
@@ -228,29 +227,31 @@ class PointCloudAccumulator(Node):
             
             cloud.transform(mat)
             with self._lock:
+                print(f"Accumulating point cloud with {len(self.pcd.points)} points")
                 if self.acc_bool:
                     self.pcd += cloud
-                    self.pcd = self.pcd.voxel_down_sample(VOXEL_SIZE)
-                    # print(f"{type(self.pcd)=}")
-                    #idk why these print progres bars
-                    if STATISTICAL_OUTLIER_REMOVAL:
-                        self.pcd, _ = self.pcd.remove_statistical_outlier(
-                            nb_neighbors=STATISTICAL_NB_NEIGHBORS,
-                            std_ratio=STATISTICAL_STD_RATIO,
-                            print_progress=False
-                        )
-                        # print("statistical outlier removal done")
-                    if RADIUS_OUTLIER_REMOVAL:
-                        self.pcd, _ = self.pcd.remove_radius_outlier(
-                            nb_points=RADIUS_NB_POINTS,
-                            radius=RADIUS_RADIUS,
-                            print_progress=False
-                        )
+                self.pcd = self.pcd.voxel_down_sample(VOXEL_SIZE)
+                # print(f"{type(self.pcd)=}")
+                #idk why these print progres bars
+                if STATISTICAL_OUTLIER_REMOVAL:
+                    self.pcd, _ = self.pcd.remove_statistical_outlier(
+                        nb_neighbors=STATISTICAL_NB_NEIGHBORS,
+                        std_ratio=STATISTICAL_STD_RATIO,
+                        print_progress=False
+                    )
+                    # print("statistical outlier removal done")
+                if RADIUS_OUTLIER_REMOVAL:
+                    self.pcd, _ = self.pcd.remove_radius_outlier(
+                        nb_points=RADIUS_NB_POINTS,
+                        radius=RADIUS_RADIUS,
+                        print_progress=False
+                    )
                     # print("radius outlier removal done")
 
     def publish_accumulated_pc(self):
         msg_out = self.get_msg()
         self.publisher.publish(msg_out)
+        print(f"Published accumulated point cloud with {len(self.pcd.points)} points")
 
     def pc_clear_callback(self, request, response):
         self.get_logger().info(f"Got request: {request}")
@@ -266,8 +267,11 @@ class PointCloudAccumulator(Node):
 
         msg_out = self.get_msg()
 
+        self.get_logger().info("PointCloud message constructor")
+
         response.cloud = msg_out
 
+        self.get_logger().info("PointCloud service returned")
         return response
 
     def save_pointcloud_callback(self, request, response):
