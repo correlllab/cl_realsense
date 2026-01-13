@@ -11,7 +11,7 @@ import numpy as np
 from sensor_msgs_py import point_cloud2
 from std_msgs.msg import Header
 from std_srvs.srv import Trigger
-from ur_manipulation.srv import GetPointCloud
+from arpa_control.srv import GetPointCloud
 import time
 import struct
 import os
