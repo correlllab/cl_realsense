@@ -26,6 +26,7 @@ def make_camera(name: str, serial: str, width: int, height: int, fps: int) -> No
         namespace='realsense',
         output='screen',
         emulate_tty=True,
+        ros_arguments=['--log-level', f'realsense.{name}:=ERROR'],
         parameters=[{
             # === Identification & Logging ===
             'use_sim_time': False,
@@ -49,8 +50,8 @@ def make_camera(name: str, serial: str, width: int, height: int, fps: int) -> No
             'pointcloud__neon_.enable': True,
             'pointcloud__neon_.stream_filter': 2,
             'pointcloud__neon_.stream_index_filter': 0,
-            'pointcloud__neon_.filter_magnitude': 2,
-            'pointcloud__neon_.frames_queue_size': 4,
+            'pointcloud__neon_.filter_magnitude': 1,
+            'pointcloud__neon_.frames_queue_size': 8,
 
             # === Plugins ===
             # f'{name}.color.image_raw.enable_pub_plugins':      ['image_transport/compressed'],
@@ -79,12 +80,12 @@ def make_camera(name: str, serial: str, width: int, height: int, fps: int) -> No
             'rgb_camera.color_profile': f"{width}x{height}x{fps}",
 
             # === Filters ===
-            'decimation_filter.enable': True,
-            'decimation_filter.filter_magnitude': 3,
-            'pointcloud.stream_filter':2,
-            'pointcloud.stream_index_filter':0,
-            'pointcloud.filter_magnitude':2,
-            'pointcloud.frames_queue_size':4,
+            'decimation_filter.enable': False,
+            'decimation_filter.filter_magnitude': 1,
+            'pointcloud.stream_filter': 0,
+            'pointcloud.stream_index_filter': 0,
+            'pointcloud.filter_magnitude': 1,
+            'pointcloud.frames_queue_size': 8,
             # 'spatial_filter.enable': False,
             # 'temporal_filter.enable': False,
             # 'hole_filling_filter.enable': False,
@@ -109,8 +110,8 @@ def make_camera(name: str, serial: str, width: int, height: int, fps: int) -> No
 
 def generate_launch_description() -> LaunchDescription:
     ld = LaunchDescription()
-    width = 640
-    height = 480
+    width = 1280
+    height = 720
     ee_cam = make_camera("ee_cam", "_838212073340", width, height, 6)
     # ee_cam = make_camera("ee_cam", "_836612071918", width, height, 6)
 

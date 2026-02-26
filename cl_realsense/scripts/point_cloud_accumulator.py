@@ -21,7 +21,7 @@ TOPIC_NAMES = ["/realsense/ee_cam/depth/color/points"]  # topic suffixes for you
 BASE_FRAME = 'floor_link'
 
 # Accumulation settings
-VOXEL_SIZE = 0.01  # downsample voxel size
+VOXEL_SIZE = 0.005  # downsample voxel size
 
 STATISTICAL_OUTLIER_REMOVAL = False
 STATISTICAL_NB_NEIGHBORS = 20
@@ -39,7 +39,9 @@ TF_TIMEOUT_SEC = 0.5
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 POINTCLOUD_SAVE_DIR = os.path.join(SCRIPT_DIR, "accumulated_pointclouds")
 POINTCLOUD_PATH = os.path.join(POINTCLOUD_SAVE_DIR, "accumulated_pointcloud.ply")
-AUTO_LOAD_ON_STARTUP = True 
+AUTO_LOAD_ON_STARTUP = True
+
+MIN_DISTANCE_FROM_CAMERA = 0.2  # meters
 MAX_DISTANCE_FROM_CAMERA = 0.5  # meters
 MAX_QUEUE_SIZE = 10
 
@@ -48,6 +50,7 @@ def msg_to_pcd(msg: PointCloud2) -> o3d.geometry.PointCloud:
     Convert ROS PointCloud2 message to Open3D PointCloud (with color).
     Handles packed 'rgb' field from RealSense cameras.
     """
+
     points_list = list(point_cloud2.read_points(msg, field_names=('x', 'y', 'z', 'rgb'), skip_nans=True))
     if not points_list:
         return o3d.geometry.PointCloud()
@@ -55,30 +58,38 @@ def msg_to_pcd(msg: PointCloud2) -> o3d.geometry.PointCloud:
     filtered_points = []
     for p in points_list:
         distance = np.sqrt(p[0]**2 + p[1]**2 + p[2]**2)
-        if distance <= MAX_DISTANCE_FROM_CAMERA:
+        if MIN_DISTANCE_FROM_CAMERA <= distance <= MAX_DISTANCE_FROM_CAMERA:
             filtered_points.append(p)
     points_list = filtered_points
     
     if not points_list:
         return o3d.geometry.PointCloud()
 
+
+
     xyz = [[p[0], p[1], p[2]] for p in points_list]
     rgb_floats = [p[3] for p in points_list]
+
+
 
     endian = '>' if msg.is_bigendian else '<'
     rgb_bytes = struct.pack(endian + 'f' * len(rgb_floats), *rgb_floats)
     rgb_uint32s = struct.unpack(endian + 'I' * len(rgb_floats), rgb_bytes)
+
+
 
     colors = []
     for i in rgb_uint32s:
         r = (i >> 16) & 0xFF
         g = (i >> 8) & 0xFF
         b = i & 0xFF
-        colors.append([r / 255.0, g / 255.0, b / 255.0])
+        colors.append([r / 255.0, g / 255.0, b / 255.0])    
 
     pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(np.asarray(xyz, dtype=np.float32))
-    pcd.colors = o3d.utility.Vector3dVector(np.asarray(colors, dtype=np.float32))
+
+    pcd.points = o3d.utility.Vector3dVector(np.asarray(xyz, dtype=np.float64))
+    pcd.colors = o3d.utility.Vector3dVector(np.asarray(colors, dtype=np.float64))
+
     return pcd
 
 def transform_to_matrix(trans) -> np.ndarray:
@@ -86,7 +97,7 @@ def transform_to_matrix(trans) -> np.ndarray:
     Convert a TransformStamped into a 4x4 numpy transformation matrix.
     """
     q = trans.transform.rotation
-    mat = np.identity(4)
+    mat = np.identity(4, dtype=np.float64)
     mat[0, 0] = 1 - 2*q.y**2 - 2*q.z**2
     mat[0, 1] = 2*q.x*q.y - 2*q.w*q.z
     mat[0, 2] = 2*q.x*q.z + 2*q.w*q.y
@@ -129,7 +140,7 @@ class PointCloudAccumulator(Node):
         self.srv_load = self.create_service(Trigger, "pointcloud_accumulator/load_arm_pointcloud", self.load_pointcloud_callback)
         self.stop_acc_srv = self.create_service(Trigger, "pointcloud_accumulator/stop_acc", self.stop_save_callback)
         self.start_acc_srv = self.create_service(Trigger, "pointcloud_accumulator/start_acc", self.start_save_callback)
-        self.acc_bool = False
+        self.acc_bool = True
 
 
         self._lock = threading.Lock()
@@ -137,7 +148,6 @@ class PointCloudAccumulator(Node):
         self._timer = self.create_timer(1.0 / PUBLISH_RATE_HZ, self.publish_accumulated_pc)
         self._executor = rclpy.executors.SingleThreadedExecutor()
         self._executor.add_node(self)
-        
         
         threading.Thread(target=self._executor.spin, daemon=True).start()
 
@@ -158,8 +168,8 @@ class PointCloudAccumulator(Node):
 
     def get_msg(self) -> PointCloud2:
         with self._lock:
-            points = np.asarray(self.pcd.points)
-            colors = np.asarray(self.pcd.colors)
+            points = np.asarray(self.pcd.points).copy()
+            colors = np.asarray(self.pcd.colors).copy()
         header = Header()
         header.stamp = self.get_clock().now().to_msg()
         header.frame_id = BASE_FRAME
@@ -186,10 +196,11 @@ class PointCloudAccumulator(Node):
         return msg_out
 
     def pc_callback(self, msg: PointCloud2):
+
         source_frame = msg.header.frame_id
         t = msg.header.stamp.sec
         # self.get_logger().info(f"recived pointcloud from {source_frame}, at time {t}")
-
+        
         try:
             trans = self.tf_buffer.lookup_transform(
                 BASE_FRAME,
@@ -218,14 +229,14 @@ class PointCloudAccumulator(Node):
             if msg is None:
                 time.sleep(0.1)
                 continue
-            
-            
-            mat = transform_to_matrix(trans)
+
             cloud = msg_to_pcd(msg)
             if not cloud.has_points():
                 continue
-            
+
+            mat = transform_to_matrix(trans)
             cloud.transform(mat)
+
             with self._lock:
                 print(f"Accumulating point cloud with {len(self.pcd.points)} points")
                 if self.acc_bool:
