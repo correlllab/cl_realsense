@@ -23,15 +23,17 @@ BASE_FRAME = 'floor_link'
 # Accumulation settings
 VOXEL_SIZE = 0.005  # downsample voxel size
 
-STATISTICAL_OUTLIER_REMOVAL = False
-STATISTICAL_NB_NEIGHBORS = 20
-STATISTICAL_STD_RATIO = 3.0
+STATISTICAL_OUTLIER_REMOVAL = True
+STATISTICAL_NB_NEIGHBORS = 60
+STATISTICAL_STD_RATIO = 0.5
 
-RADIUS_OUTLIER_REMOVAL = False
-RADIUS_NB_POINTS = 5
-RADIUS_RADIUS = 0.05
+RADIUS_OUTLIER_REMOVAL = True
+RADIUS_NB_POINTS = 10
+RADIUS_RADIUS = VOXEL_SIZE * (RADIUS_NB_POINTS/2)
+
 
 OUTPUT_TOPIC = '/realsense/accumulated_point_cloud'
+SUBSCRIBER_RATE_HZ = 6.0
 PUBLISH_RATE_HZ = 6.0
 TF_TIMEOUT_SEC = 0.5
 
@@ -86,10 +88,22 @@ def msg_to_pcd(msg: PointCloud2) -> o3d.geometry.PointCloud:
         colors.append([r / 255.0, g / 255.0, b / 255.0])    
 
     pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(np.asarray(xyz, dtype=np.float32))
+    pcd.colors = o3d.utility.Vector3dVector(np.asarray(colors, dtype=np.float32))
 
-    pcd.points = o3d.utility.Vector3dVector(np.asarray(xyz, dtype=np.float64))
-    pcd.colors = o3d.utility.Vector3dVector(np.asarray(colors, dtype=np.float64))
-
+    pcd = pcd.voxel_down_sample(VOXEL_SIZE)
+    if STATISTICAL_OUTLIER_REMOVAL:
+        pcd, _ = pcd.remove_statistical_outlier(
+            nb_neighbors=STATISTICAL_NB_NEIGHBORS,
+            std_ratio=STATISTICAL_STD_RATIO,
+            print_progress=False,
+        )
+    if RADIUS_OUTLIER_REMOVAL:
+        pcd, _ = pcd.remove_radius_outlier(
+            nb_points=RADIUS_NB_POINTS,
+            radius=RADIUS_RADIUS,
+            print_progress=False,
+        )
     return pcd
 
 def transform_to_matrix(trans) -> np.ndarray:
@@ -142,6 +156,8 @@ class PointCloudAccumulator(Node):
         self.start_acc_srv = self.create_service(Trigger, "pointcloud_accumulator/start_acc", self.start_save_callback)
         self.acc_bool = True
 
+        self._last_pc_time = 0.0
+        self._pc_interval = 1.0 / SUBSCRIBER_RATE_HZ
 
         self._lock = threading.Lock()
         self.msg_queue = []
@@ -196,16 +212,20 @@ class PointCloudAccumulator(Node):
         return msg_out
 
     def pc_callback(self, msg: PointCloud2):
+        now = time.time()
+        if now - self._last_pc_time < self._pc_interval:
+            return
+        self._last_pc_time = now
 
         source_frame = msg.header.frame_id
-        t = msg.header.stamp.sec
+        t = rclpy.time.Time.from_msg(msg.header.stamp)
         # self.get_logger().info(f"recived pointcloud from {source_frame}, at time {t}")
         
         try:
             trans = self.tf_buffer.lookup_transform(
                 BASE_FRAME,
                 source_frame,
-                rclpy.time.Time(),
+                t,
                 timeout=Duration(seconds=TF_TIMEOUT_SEC)
             )
         except TransformException as e:
@@ -242,22 +262,6 @@ class PointCloudAccumulator(Node):
                 if self.acc_bool:
                     self.pcd += cloud
                 self.pcd = self.pcd.voxel_down_sample(VOXEL_SIZE)
-                # print(f"{type(self.pcd)=}")
-                #idk why these print progres bars
-                if STATISTICAL_OUTLIER_REMOVAL:
-                    self.pcd, _ = self.pcd.remove_statistical_outlier(
-                        nb_neighbors=STATISTICAL_NB_NEIGHBORS,
-                        std_ratio=STATISTICAL_STD_RATIO,
-                        print_progress=False
-                    )
-                    # print("statistical outlier removal done")
-                if RADIUS_OUTLIER_REMOVAL:
-                    self.pcd, _ = self.pcd.remove_radius_outlier(
-                        nb_points=RADIUS_NB_POINTS,
-                        radius=RADIUS_RADIUS,
-                        print_progress=False
-                    )
-                    # print("radius outlier removal done")
 
     def publish_accumulated_pc(self):
         msg_out = self.get_msg()

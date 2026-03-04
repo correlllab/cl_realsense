@@ -112,8 +112,9 @@ def generate_launch_description() -> LaunchDescription:
     ld = LaunchDescription()
     width = 1280
     height = 720
-    ee_cam = make_camera("ee_cam", "_838212073340", width, height, 6)
-    # ee_cam = make_camera("ee_cam", "_836612071918", width, height, 6)
+    fps = 6
+    ee_cam = make_camera("ee_cam", "_838212073340", width, height, fps)
+    # ee_cam = make_camera("ee_cam", "_836612071918", width, height, fps)
 
     ld.add_action(ee_cam)
     output_stream = "log"
@@ -153,7 +154,7 @@ def generate_launch_description() -> LaunchDescription:
         executable='static_transform_publisher',
         name='static_ee_cam_tf',
         arguments = [
-            '0.033838200335085646', '-0.16124934095715254', '0.04973827839776546',
+            '0.033838200335085646', '-0.17124934095715254', '0.04973827839776546',
             '0.7090084119721195', '0.004283455595113997', '0.7051866592991314', '0.000706616917886843',
             #'0.0199', '-0.1767', '0.0534',
             #neg_ninety, neg_ninety, neg_ninety,
