@@ -7,6 +7,7 @@ from launch.substitutions import LaunchConfiguration
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 from launch.actions import LogInfo
+from launch.actions import OpaqueFunction, DeclareLaunchArgument, TimerAction
 
 from ament_index_python.packages import get_package_share_directory
 
@@ -24,9 +25,9 @@ def make_camera(name: str, serial: str, width: int, height: int, fps: int) -> No
         executable='realsense2_camera_node',
         name=name,
         namespace='realsense',
-        output='screen',
+        output="log",
         emulate_tty=True,
-        ros_arguments=['--log-level', f'realsense.{name}:=ERROR'],
+        # ros_arguments=['--log-level', f'realsense.{name}:=ERROR'],
         parameters=[{
             # === Identification & Logging ===
             'use_sim_time': False,
@@ -86,9 +87,17 @@ def make_camera(name: str, serial: str, width: int, height: int, fps: int) -> No
             'pointcloud.stream_index_filter': 0,
             'pointcloud.filter_magnitude': 1,
             'pointcloud.frames_queue_size': 8,
-            # 'spatial_filter.enable': False,
-            # 'temporal_filter.enable': False,
-            # 'hole_filling_filter.enable': False,
+            # 'spatial_filter.enable': True,
+            # 'spatial_filter.filter_magnitude': 2,
+            # 'spatial_filter.filter_smooth_alpha': 0.5,
+            # 'spatial_filter.filter_smooth_delta': 15,
+            # 'spatial_filter.holes_fill': 2,
+            # 'temporal_filter.enable': True,
+            # 'temporal_filter.filter_smooth_alpha': 0.4,
+            # 'temporal_filter.filter_smooth_delta': 20,
+            # 'temporal_filter.holes_fill': 3,
+            # 'hole_filling_filter.enable': True,
+            # 'hole_filling_filter.holes_fill': 2,
 
             # === Transform & Playback ===
             # 'publish_tf': True,
@@ -106,47 +115,14 @@ def make_camera(name: str, serial: str, width: int, height: int, fps: int) -> No
         }]
     )
 
-
-
-def generate_launch_description() -> LaunchDescription:
-    ld = LaunchDescription()
-    width = 1280
-    height = 720
-    fps = 6
-    ee_cam = make_camera("ee_cam", "_838212073340", width, height, fps)
-    # ee_cam = make_camera("ee_cam", "_836612071918", width, height, fps)
-
-    ld.add_action(ee_cam)
-    output_stream = "log"
-
-    # proc_node = Node(
-    #         package='depth_image_proc',
-    #         executable='point_cloud_xyz_node',
-    #         name='depth_image_to_point_cloud',
-    #         output=output_stream,
-    #         parameters=[{
-    #             'depth_image': '/realsense/ee_cam/aligned_depth_to_color/image_raw',
-    #             'rgb_image': '/realsense/ee_cam/color/image_raw',
-    #             'camera_info': '/realsense/ee_cam/aligned_depth_to_color/camera_info',
-    #             'pointcloud_topic': '/realsense/ee_cam/pointcloud',
-    #         }],
-    #         remappings=[
-    #             ('/image_rect', '/realsense/ee_cam/aligned_depth_to_color/image_raw'),
-    #             ('/camera/color/image', '/realsense/ee_cam/color/image_raw'),
-    #             ('/camera_info', '/realsense/ee_cam/aligned_depth_to_color/camera_info'),
-    #             ('/camera/pointcloud', '/realsense/ee_cam/pointcloud'),
-    #         ]
-    # )
-    # ld.add_action(proc_node)
-
-
+def launch_setup(context, *args, **kwargs):
     acc_node = Node(
         package = "cl_realsense",
         executable = "pc_acc",
         name = "pointcloud_accumulator",
-        output = output_stream
+        output = "log",
+        emulate_tty=False, # This flag forces the output to be treated as a terminal
     )
-    ld.add_action(acc_node)
 
     neg_ninety = str(-3.1415/2.)
     static_ee_cam_tf = Node(
@@ -156,17 +132,24 @@ def generate_launch_description() -> LaunchDescription:
         arguments = [
             '0.033838200335085646', '-0.17124934095715254', '0.04973827839776546',
             '0.7090084119721195', '0.004283455595113997', '0.7051866592991314', '0.000706616917886843',
-            #'0.0199', '-0.1767', '0.0534',
-            #neg_ninety, neg_ninety, neg_ninety,
             'tool0',
             'ee_cam_link',
         ],
-        output=output_stream
+        output="log"
     )
-    # delayed_ee_cam_tf = TimerAction(
-    #     period=10.0,  # Wait for 5 seconds before starting the static transform
-    #     actions=[static_ee_cam_tf]
-    # )
-    ld.add_action(static_ee_cam_tf)
-    print("here4 from", __file__)
-    return ld
+    
+    width = 1280
+    height = 720
+    fps = 6
+    ee_cam = make_camera("ee_cam", "_838212073340", width, height, fps)
+
+
+    return [ee_cam, acc_node, static_ee_cam_tf]
+
+def generate_launch_description():
+    declared_arguments = []
+
+    return LaunchDescription(declared_arguments + [OpaqueFunction(function=launch_setup)])
+
+
+
