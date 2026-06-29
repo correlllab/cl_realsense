@@ -108,8 +108,8 @@ def generate_launch_description() -> LaunchDescription:
     head_cam = make_camera("head", "_250122072330", width, height, 6, "head_camera_link")
     ld.add_action(head_cam)
 
-    left_hand_cam = make_camera("left_hand", "_838212072778", width, height, 6, "left_hand_camera_link")
-    ld.add_action(left_hand_cam)
+    # left_hand_cam = make_camera("left_hand", "_838212072778", width, height, 6, "left_hand_camera_link")
+    # ld.add_action(left_hand_cam)
 
     # pc_acc_node = Node(
     #     package='cl_realsense',
@@ -132,24 +132,24 @@ def generate_launch_description() -> LaunchDescription:
 
     
 
-    static_hand_tf = Node(
-        package='tf2_ros',
-        executable='static_transform_publisher',
-        name='static_hand_tf_hand',
-        arguments = [
-            '-0.01866', '-0.0333', '0.108',     # x y z
-            '0.5', '-0.5', '0.5', '0.5',        # qx qy qz qw
-            'left_hand_camera_link',
-            'left_hand_link',
+    # static_hand_tf = Node(
+    #     package='tf2_ros',
+    #     executable='static_transform_publisher',
+    #     name='static_hand_tf_hand',
+    #     arguments = [
+    #         '-0.01866', '-0.0333', '0.108',     # x y z
+    #         '0.5', '-0.5', '0.5', '0.5',        # qx qy qz qw
+    #         'left_hand_camera_link',
+    #         'left_hand_link',
             
-        ],
-        output='screen'
-    )
-    delayed_hand_tf = TimerAction(
-        period=10.0,  # Wait for 5 seconds before starting the static transform
-        actions=[static_hand_tf]
-    )
-    ld.add_action(delayed_hand_tf)
+    #     ],
+    #     output='screen'
+    # )
+    # delayed_hand_tf = TimerAction(
+    #     period=10.0,  # Wait for 5 seconds before starting the static transform
+    #     actions=[static_hand_tf]
+    # )
+    # ld.add_action(delayed_hand_tf)
 
 
     static_head_tf = Node(
