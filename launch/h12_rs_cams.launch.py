@@ -13,7 +13,7 @@ import json
 
 
 
-def make_camera(name: str, serial: str, width: int, height: int, fps: int, source_frame) -> Node:
+def make_camera(name: str, serial: str, width: int, height: int, fps: int, source_frame, enable_pointcloud: bool = False) -> Node:
     """
     Factory function to create a RealSense camera node.
     All parameters are shown grouped by modality; most are commented out by default.
@@ -39,7 +39,7 @@ def make_camera(name: str, serial: str, width: int, height: int, fps: int, sourc
             'enable_depth':True,
             'enable_sync':False,
             'align_depth.enable':True,
-            'pointcloud.enable':True,
+            'pointcloud.enable':enable_pointcloud,
             'enable_accel':False,            
             'enable_gyro':False,
             'enable_infra1':False,
@@ -74,11 +74,11 @@ def make_camera(name: str, serial: str, width: int, height: int, fps: int, sourc
 
             # === Filters ===
             'decimation_filter.enable': True,
-            'decimation_filter.filter_magnitude': 3,
-            'pointcloud.stream_filter':2,
+            'decimation_filter.filter_magnitude': 2,
+            'pointcloud.stream_filter':2,          # RS2_STREAM_COLOR: texture-maps color onto the cloud
             'pointcloud.stream_index_filter':0,
-            'pointcloud.filter_magnitude':2,
-            'pointcloud.frames_queue_size':4,
+            # 'pointcloud.filter_magnitude':2,
+            # 'pointcloud.frames_queue_size':4,
             # 'spatial_filter.enable': False,
             # 'temporal_filter.enable': False,
             # 'hole_filling_filter.enable': False,
@@ -103,20 +103,20 @@ def make_camera(name: str, serial: str, width: int, height: int, fps: int, sourc
 
 def generate_launch_description() -> LaunchDescription:
     ld = LaunchDescription()
-    head_width = 640
-    head_height = 480
+    head_width = 1280
+    head_height = 720
     head_fps = 6
 
-    gripper_width = 640
-    gripper_height = 480
+    gripper_width = 1280
+    gripper_height = 720
     gripper_fps = 5
-    head_cam = make_camera("head", "_250122072330", head_width, head_height, head_fps, "head_camera_link")
+    head_cam = make_camera("head", "_250122072330", head_width, head_height, head_fps, "head_camera_link", enable_pointcloud=True)
     ld.add_action(head_cam)
 
-    left_hand_cam = make_camera("left_hand", "_323622271892", gripper_width, gripper_height, gripper_fps, "left_hand_camera_link")
+    left_hand_cam = make_camera("left_hand", "_323622271892", gripper_width, gripper_height, gripper_fps, "left_hand_camera_link", enable_pointcloud=True)
     ld.add_action(left_hand_cam)
 
-    right_hand_cam = make_camera("right_hand", "_353322271903", gripper_width, gripper_height, gripper_fps, "right_hand_camera_link")
+    right_hand_cam = make_camera("right_hand", "_353322271903", gripper_width, gripper_height, gripper_fps, "right_hand_camera_link", enable_pointcloud=True)
     ld.add_action(right_hand_cam)
 
     static_lg_mount_tf = Node(
@@ -162,7 +162,7 @@ def generate_launch_description() -> LaunchDescription:
         executable='static_transform_publisher',
         name='static_head_tf_head',
         arguments = [
-            '0', '0', '0', #x, y, z translation
+            '0', '-0.03', '0', #x, y, z translation
             '0.5', '-0.5', '0.5', '0.5', #x, y, z, w quats
             'head_camera_link',
             'head_link',
