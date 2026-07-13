@@ -170,7 +170,7 @@ def generate_launch_description() -> LaunchDescription:
         output='screen'
     )
     delayed_head_tf = TimerAction(
-        period=10.0,  # Wait for 5 seconds before starting the static transform
+        period=10.0,  # Wait for 10 seconds before starting the static transform
         actions=[static_head_tf]
     )
     ld.add_action(delayed_head_tf)
