@@ -162,9 +162,11 @@ def generate_launch_description() -> LaunchDescription:
         executable='static_transform_publisher',
         name='static_head_tf_head',
         arguments = [
-            '0', '-0.03', '0', #x, y, z translation
-            '0.5', '-0.5', '0.5', '0.5', #x, y, z, w quats
-            'head_camera_link',
+            #'0', '-0.03', '0', #x, y, z translation
+            #'0.5', '-0.5', '0.5', '0.5', #x, y, z, w quats
+            '0.000985', '0.014977', '-0.018805',
+            '-0.510111', '0.523885', '-0.486398', '-0.478277',
+	    'head_camera_link',
             'head_link',
         ],
         output='screen'
