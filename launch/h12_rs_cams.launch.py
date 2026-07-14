@@ -157,16 +157,21 @@ def generate_launch_description() -> LaunchDescription:
     ld.add_action(delayed_rg_mount_tf)
 
 
+    # Calibrated 2026-07-13 by hand-to-eye (h12_cameracalibration): joint NLS
+    # over 81 views fused from three historical sessions (10 mm board, wrist-
+    # mounted, pelvis-base data converted through the URDF head mount), median
+    # reprojection 11.2 px; replaces the hand-tuned values (0, -0.03, 0 /
+    # 0.5, -0.5, 0.5, 0.5), a ~49 mm / 4.2 deg correction. Estimated accuracy
+    # ~+/-13 mm / 1.5 deg — regenerate from a fresh collection with
+    # h12_cameracalibration/handtoeye_refine.py when possible.
     static_head_tf = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
         name='static_head_tf_head',
         arguments = [
-            #'0', '-0.03', '0', #x, y, z translation
-            #'0.5', '-0.5', '0.5', '0.5', #x, y, z, w quats
-            '0.000985', '0.014977', '-0.018805',
-            '-0.510111', '0.523885', '-0.486398', '-0.478277',
-	    'head_camera_link',
+            '0.000985', '0.014977', '-0.018805',            # x, y, z translation
+            '-0.510111', '0.523885', '-0.486398', '-0.478277',  # qx, qy, qz, qw
+            'head_camera_link',
             'head_link',
         ],
         output='screen'
