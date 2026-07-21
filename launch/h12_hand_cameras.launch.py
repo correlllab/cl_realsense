@@ -102,7 +102,7 @@ def generate_launch_description() -> LaunchDescription:
     ld = LaunchDescription()
     gripper_width = 1280
     gripper_height = 720
-    gripper_fps = 5
+    gripper_fps = 30
 
     left_hand_cam = make_camera("left_hand", "_323622271892", gripper_width, gripper_height, gripper_fps, "left_hand_camera_link", enable_pointcloud=True)
     ld.add_action(left_hand_cam)
