@@ -102,7 +102,7 @@ def generate_launch_description() -> LaunchDescription:
     ld = LaunchDescription()
     head_width = 1280
     head_height = 720
-    head_fps = 6
+    head_fps = 30
 
     head_cam = make_camera("head", "_250122072330", head_width, head_height, head_fps, "head_camera_link", enable_pointcloud=True)
     ld.add_action(head_cam)
